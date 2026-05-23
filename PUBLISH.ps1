@@ -39,4 +39,5 @@ try {
 git remote remove origin 2>$null
 git remote add origin "https://github.com/$Owner/$Repo.git"
 git branch -M main
-git -c "http.extraheader=AUTHORIZATION: bearer $env:GITHUB_TOKEN" push -u origin main
+$basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$env:GITHUB_TOKEN"))
+git -c "http.extraHeader=Authorization: Basic $basic" push -u origin main
