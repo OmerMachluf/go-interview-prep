@@ -358,3 +358,160 @@ func TestAdd(t *testing.T) {
 - Did you avoid overengineering with generics?
 - Did you run `gofmt`, `go test ./...`, and maybe `go test -race ./...`?
 
+## 22. Backend Interview Supplement
+
+### DB Means The App's Database
+
+When people say "DB" in Go backend code, they mean the application's database:
+Postgres, MySQL, MongoDB, Redis, BigQuery, etc. Go itself only provides
+libraries and drivers for talking to those systems.
+
+Common examples:
+
+```go
+db.QueryContext(ctx, query)
+repo.UpdateUser(ctx, user)
+```
+
+Important: mutating a loaded entity pointer usually only changes the in-memory
+object. It does not automatically persist to the database unless the app uses a
+specific ORM/session pattern that tracks changes.
+
+```go
+user.Active = true
+
+if err := repo.UpdateUser(ctx, user); err != nil {
+    return fmt.Errorf("update user: %w", err)
+}
+```
+
+### Request Flow Mental Model
+
+Typical backend shape:
+
+```text
+main/cmd -> router -> handler/controller -> service/usecase -> repo/store/client -> DB/API
+```
+
+- `main` / `cmd`: starts the binary, loads config, wires dependencies.
+- `router`: maps routes/RPC methods to handlers.
+- `handler` / `controller`: parses transport-level input and writes responses.
+- `service` / `usecase`: owns business logic.
+- `repo` / `store`: owns persistence.
+- `client`: calls another service or external API.
+
+When handed a ticket, trace this path before editing.
+
+### Context Timeout Judgment
+
+Pass the incoming `ctx` through lower layers. Do not create
+`context.Background()` inside request flow unless there is a very specific
+reason to detach work from the request.
+
+Set timeouts at boundaries:
+
+- HTTP server config.
+- External API calls.
+- DB operations if that layer owns a clear SLA.
+- Background jobs with known limits.
+
+Avoid adding random timeouts in every function; it makes behavior hard to reason
+about.
+
+Good interview sentence:
+
+> "I'll preserve the request context and only introduce a child timeout where this boundary owns a specific external operation."
+
+### Panic And Recover
+
+`recover()` is a built-in Go function. It only works inside a deferred function
+while a panic is unwinding.
+
+```go
+func safe() {
+    defer func() {
+        if r := recover(); r != nil {
+            fmt.Println("recovered from:", r)
+        }
+    }()
+
+    panic("boom")
+}
+```
+
+Backend frameworks often use recovery middleware so one panicking request does
+not crash the whole server. Still, do not use `panic` for normal control flow.
+Return `error`.
+
+### Struct Tags
+
+Struct tags are metadata read by libraries through reflection.
+
+```go
+type User struct {
+    Email string `json:"email,omitempty" db:"email" validate:"required,email"`
+}
+```
+
+Common tags:
+
+- `json`: JSON field names and options.
+- `db`: database column mapping.
+- `yaml`: YAML field names.
+- `validate`: validation rules.
+- `form` / `binding`: request binding rules in some web frameworks.
+
+Only exported fields, meaning capitalized fields, are visible to packages like
+`encoding/json`.
+
+### Channels Judgment
+
+Use channels when the problem is naturally about coordination between
+goroutines:
+
+- worker pools
+- pipelines
+- fan-out / fan-in
+- streaming results
+- completion signals
+- cancellation coordination
+
+Do not introduce channels just to make business logic look Go-ish. Plain
+synchronous code or a mutex is often clearer.
+
+### Imports In Practice
+
+```go
+import (
+    "context"
+    "fmt"
+
+    "github.com/stretchr/testify/require"
+)
+```
+
+Unused imports fail compilation. `goimports` fixes imports and formatting;
+`gofmt` only formats.
+
+### Loop Variable Caution
+
+Go 1.22 improved classic `range` loop capture behavior, but be careful around
+goroutines and closures in loops, especially in older modules or when variables
+are manually reused.
+
+Older safe pattern:
+
+```go
+for _, item := range items {
+    item := item
+    go func() {
+        use(item)
+    }()
+}
+```
+
+### Honest Preparedness Sentence
+
+Since they know you have not worked in Go professionally, do not pretend.
+
+> "I'm new to Go professionally, so I'll follow the repo's existing patterns closely. I've prepared around context propagation, explicit errors, pointer/value semantics, slices, cancellation, and concurrency safety. I'll avoid clever abstractions and keep the change easy to review."
